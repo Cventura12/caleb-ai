@@ -92,6 +92,8 @@ async function runAgentLoop(
       messages,
     });
 
+    console.log(`[agent] iter=${i} stop_reason="${response.stop_reason}" content_types=[${response.content.map((b) => b.type).join(",")}]`);
+
     // ── Final text answer ────────────────────────────────────────────────────
     if (response.stop_reason === "end_turn") {
       const text = response.content
@@ -119,11 +121,12 @@ async function runAgentLoop(
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const tu of toolUseBlocks) {
+        console.log(`[agent] tool_use: name="${tu.name}" id="${tu.id}" input=${JSON.stringify(tu.input)}`);
+        console.log(`[agent] allowed names: [${[...allowedNames].join(", ")}]`);
+
         // ── Lane enforcement: Step 2 — re-verify at execution time ─────────
-        // This is the security critical check. Even if somehow a tool name not
-        // in the allowed set reached us, we will not execute it.
         if (!allowedNames.has(tu.name)) {
-          console.warn(`[/api/chat] Blocked tool not in lane "${lane}": ${tu.name}`);
+          console.warn(`[agent] BLOCKED — tool "${tu.name}" not in lane "${lane}"`);
           toolResults.push({
             type: "tool_result",
             tool_use_id: tu.id,
@@ -134,6 +137,7 @@ async function runAgentLoop(
         }
 
         const tool = TOOL_REGISTRY.find((t) => t.name === tu.name)!;
+        console.log(`[agent] found tool in registry: "${tool.name}" — calling execute()`);
 
         // Emit status BEFORE executing so the client sees it immediately.
         ctrl.enqueue(sse({ type: "status", label: tool.statusLabel }));
@@ -141,7 +145,9 @@ async function runAgentLoop(
         let result: string;
         try {
           result = await tool.execute(tu.input as Record<string, unknown>);
+          console.log(`[agent] tool execute succeeded: "${tool.name}" → result:`, result.slice(0, 300));
         } catch (err) {
+          console.error(`[agent] tool execute THREW: "${tool.name}" →`, err);
           result = `Error: ${err instanceof Error ? err.message : "tool failed"}`;
         }
 

@@ -13,6 +13,7 @@ export const create_scheduling_link: ToolDefinition = {
   lane: "public",
   statusLabel: "setting up your booking…",
   execute: async (_input) => {
+    console.log("[create_scheduling_link] execute() entered");
     const userUri = getMyUri();
     const eventType = await getEventType(userUri);
 

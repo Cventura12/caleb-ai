@@ -1,4 +1,6 @@
 import { get_current_time } from "./get_current_time";
+import { get_availability } from "./get_availability";
+import { create_scheduling_link } from "./create_scheduling_link";
 
 // ─── Tool registry types ──────────────────────────────────────────────────────
 
@@ -26,4 +28,8 @@ export interface ToolDefinition {
 // ─── Registry ─────────────────────────────────────────────────────────────────
 // Add new tools here. The agent loop reads this array — no other wiring needed.
 
-export const TOOL_REGISTRY: ToolDefinition[] = [get_current_time];
+export const TOOL_REGISTRY: ToolDefinition[] = [
+  get_current_time,
+  get_availability,
+  create_scheduling_link,
+];

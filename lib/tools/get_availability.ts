@@ -24,7 +24,7 @@ export const get_availability: ToolDefinition = {
         ? Math.min(Math.max(1, input.days_ahead), 7)
         : 7;
 
-    const userUri = await getMyUri();
+    const userUri = getMyUri();
     const eventType = await getEventType(userUri);
 
     if (!eventType) {

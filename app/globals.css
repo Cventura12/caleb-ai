@@ -88,3 +88,26 @@ body {
     opacity: 0.5;
   }
 }
+
+/* ── Tool status line dot ─────────────────────────────────────────── */
+@keyframes status-pulse {
+  0%, 100% { opacity: 0.2; }
+  50%       { opacity: 0.7; }
+}
+
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gray-3);
+  flex-shrink: 0;
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot {
+    animation: none;
+    opacity: 0.5;
+  }
+}

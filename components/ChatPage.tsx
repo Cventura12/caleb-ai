@@ -46,6 +46,7 @@ export default function ChatPage() {
   // Invisible seed — framing sent to the API on every turn but never rendered
   const [apiSeed, setApiSeed] = useState<ApiMessage | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
   const [hasSentMessage, setHasSentMessage] = useState(false);
 
   const isGate = pageState === "gate";
@@ -73,9 +74,11 @@ export default function ChatPage() {
 
     // Fetch the personalized greeting immediately — first visible message in thread
     try {
-      const reply = await getReply([seed]);
+      const reply = await getReply([seed], (label) => setToolStatus(label));
+      setToolStatus(null);
       setMessages([{ id: newId(), role: "them", text: reply }]);
     } catch (err) {
+      setToolStatus(null);
       setMessages([errorBubble(err)]);
     } finally {
       setIsTyping(false);
@@ -111,12 +114,17 @@ export default function ChatPage() {
     setIsTyping(true);
 
     try {
-      const reply = await getReply(buildApiHistory(apiSeed, next));
+      const reply = await getReply(
+        buildApiHistory(apiSeed, next),
+        (label) => setToolStatus(label)
+      );
+      setToolStatus(null);
       setMessages((prev) => [
         ...prev.filter((m) => !m.isError),
         { id: newId(), role: "them", text: reply },
       ]);
     } catch (err) {
+      setToolStatus(null);
       setMessages((prev) => [
         ...prev.filter((m) => !m.isError),
         errorBubble(err),
@@ -188,7 +196,7 @@ export default function ChatPage() {
             <p className="mt-auto pt-8 text-[11.5px] text-gray-3">caleb.ai</p>
           </div>
         ) : (
-          <MessageList messages={messages} isTyping={isTyping} />
+          <MessageList messages={messages} isTyping={isTyping} toolStatus={toolStatus} />
         )}
       </main>
 

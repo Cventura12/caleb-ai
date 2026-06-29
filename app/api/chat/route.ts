@@ -1,25 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT } from "@/lib/knowledge";
+import { TOOL_REGISTRY } from "@/lib/tools/registry";
+import type { Lane } from "@/lib/tools/registry";
+import type { StreamEvent } from "@/lib/types";
 
-// Run on Node.js runtime (not Edge) — required for the Anthropic SDK.
 export const runtime = "nodejs";
-
-// Never cache this route — every request must run fresh.
 export const dynamic = "force-dynamic";
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
-// Simple in-memory map keyed by IP. Resets on every server restart / Vercel
-// redeploy. Good enough for launch; swap for Upstash Redis (or similar) when
-// real traffic warrants a durable store.
 const rateMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_MAX = 20;          // requests per window
-const RATE_WINDOW = 60_000;   // 1 minute in ms
+const RATE_MAX = 20;
+const RATE_WINDOW = 60_000;
 
 function isAllowed(ip: string): boolean {
   const now = Date.now();
   const rec = rateMap.get(ip);
-
   if (!rec || now >= rec.resetAt) {
     rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
     return true;
@@ -33,14 +29,13 @@ function isAllowed(ip: string): boolean {
 const MAX_MESSAGES = 50;
 const MAX_CONTENT_LEN = 4000;
 
-type MessageParam = { role: "user" | "assistant"; content: string };
+type SimpleMessage = { role: "user" | "assistant"; content: string };
 
-function parseMessages(body: unknown): MessageParam[] | null {
+function parseMessages(body: unknown): SimpleMessage[] | null {
   if (!body || typeof body !== "object") return null;
   const { messages } = body as Record<string, unknown>;
   if (!Array.isArray(messages) || messages.length === 0) return null;
   if (messages.length > MAX_MESSAGES) return null;
-
   for (const m of messages) {
     if (!m || typeof m !== "object") return null;
     const { role, content } = m as Record<string, unknown>;
@@ -48,8 +43,128 @@ function parseMessages(body: unknown): MessageParam[] | null {
     if (typeof content !== "string" || content.length === 0) return null;
     if (content.length > MAX_CONTENT_LEN) return null;
   }
+  return messages as SimpleMessage[];
+}
 
-  return messages as MessageParam[];
+// ─── SSE helpers ──────────────────────────────────────────────────────────────
+const enc = new TextEncoder();
+
+function sse(event: StreamEvent): Uint8Array {
+  return enc.encode(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+// ─── Agent loop ───────────────────────────────────────────────────────────────
+// Calls Anthropic with tools, processes tool_use blocks, loops until end_turn.
+// All events are pushed to the ReadableStream controller as SSE frames.
+
+const MAX_ITER = 5;
+
+async function runAgentLoop(
+  initialMessages: SimpleMessage[],
+  lane: Lane,
+  ctrl: ReadableStreamDefaultController<Uint8Array>
+): Promise<void> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+  // ── Lane enforcement: filter registry to what this lane may see ────────────
+  // Step 1: only allowed tools are sent to the model.
+  const allowedTools = TOOL_REGISTRY.filter((t) => t.lane === lane);
+  const allowedNames = new Set(allowedTools.map((t) => t.name));
+
+  const toolDefs: Anthropic.Tool[] = allowedTools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.input_schema as Anthropic.Tool.InputSchema,
+  }));
+
+  // Mutable history — grows as the loop adds assistant/tool-result turns.
+  const messages: Anthropic.MessageParam[] = initialMessages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  for (let i = 0; i < MAX_ITER; i++) {
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1000,
+      system: SYSTEM_PROMPT,
+      tools: toolDefs,
+      messages,
+    });
+
+    // ── Final text answer ────────────────────────────────────────────────────
+    if (response.stop_reason === "end_turn") {
+      const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      ctrl.enqueue(sse({ type: "text", content: text }));
+      return;
+    }
+
+    // ── Tool use ─────────────────────────────────────────────────────────────
+    if (response.stop_reason === "tool_use") {
+      const toolUseBlocks = response.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+
+      // Append the assistant's full turn (with tool_use blocks) to history.
+      // Cast needed: response ContentBlock vs param ContentBlockParam differ
+      // only by extra fields on some subtypes — the data is semantically correct.
+      messages.push({
+        role: "assistant",
+        content: response.content as unknown as Anthropic.ContentBlockParam[],
+      });
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+      for (const tu of toolUseBlocks) {
+        // ── Lane enforcement: Step 2 — re-verify at execution time ─────────
+        // This is the security critical check. Even if somehow a tool name not
+        // in the allowed set reached us, we will not execute it.
+        if (!allowedNames.has(tu.name)) {
+          console.warn(`[/api/chat] Blocked tool not in lane "${lane}": ${tu.name}`);
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: `Error: tool "${tu.name}" is not available.`,
+            is_error: true,
+          });
+          continue;
+        }
+
+        const tool = TOOL_REGISTRY.find((t) => t.name === tu.name)!;
+
+        // Emit status BEFORE executing so the client sees it immediately.
+        ctrl.enqueue(sse({ type: "status", label: tool.statusLabel }));
+
+        let result: string;
+        try {
+          result = await tool.execute(tu.input as Record<string, unknown>);
+        } catch (err) {
+          result = `Error: ${err instanceof Error ? err.message : "tool failed"}`;
+        }
+
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: tu.id,
+          content: result,
+        });
+      }
+
+      // Append tool results as the next user turn and loop.
+      messages.push({ role: "user", content: toolResults });
+      continue;
+    }
+
+    // Unexpected stop reason (e.g. max_tokens) — bail.
+    break;
+  }
+
+  // Safety cap: MAX_ITER exhausted or unexpected stop reason.
+  ctrl.enqueue(
+    sse({ type: "error", message: "ah something took too long on my end — try again in a sec" })
+  );
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -58,7 +173,10 @@ export async function POST(req: NextRequest) {
   const forwarded = req.headers.get("x-forwarded-for");
   const ip = forwarded?.split(",")[0]?.trim() ?? "unknown";
   if (!isAllowed(ip)) {
-    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+    return new Response(JSON.stringify({ error: "Too many requests." }), {
+      status: 429,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // 2. Parse body
@@ -66,39 +184,46 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
+    return new Response(JSON.stringify({ error: "Invalid JSON." }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // 3. Validate messages
   const messages = parseMessages(body);
   if (!messages) {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+    return new Response(JSON.stringify({ error: "Invalid request body." }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  // 4. Call Anthropic
-  // The API key is read from process.env — server-side only, never sent to the client.
-  try {
-    const client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
+  // 4. Lane — hardcoded "public" for now; a future auth phase sets this from
+  // a verified session token, never from client-supplied input.
+  const lane: Lane = "public";
 
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      system: SYSTEM_PROMPT,
-      messages,
-    });
+  // 5. Stream the agent loop as SSE
+  const stream = new ReadableStream<Uint8Array>({
+    async start(ctrl) {
+      try {
+        await runAgentLoop(messages, lane, ctrl);
+      } catch (err) {
+        console.error("[/api/chat] Agent loop error:", err);
+        ctrl.enqueue(
+          sse({ type: "error", message: "ah something glitched on my end — try again in a sec" })
+        );
+      } finally {
+        ctrl.close();
+      }
+    },
+  });
 
-    // Concatenate all text blocks (handles multi-block responses)
-    const reply = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("");
-
-    return NextResponse.json({ reply });
-  } catch (error) {
-    // Log full error server-side; return nothing identifiable to the client.
-    console.error("[/api/chat] Anthropic call failed:", error);
-    return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }

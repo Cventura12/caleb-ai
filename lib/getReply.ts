@@ -1,20 +1,25 @@
-import type { ApiMessage } from "./types";
+import type { ApiMessage, StreamEvent } from "./types";
 
-// Thrown on any non-2xx or network failure so callers can branch on status.
 export class ApiError extends Error {
-  constructor(public readonly status: number, message: string) {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-// ─── API SEAM ────────────────────────────────────────────────────────────────
-// Single boundary between the UI and the server route.
-// Accepts the full conversation history already mapped to "user"/"assistant".
-// Returns the AI's reply text.
-// The API key and system prompt live on the server — never here.
-// ─────────────────────────────────────────────────────────────────────────────
-export async function getReply(messages: ApiMessage[]): Promise<string> {
+// ─── API seam ──────────────────────────────────────────────────────────────────
+// Consumes the SSE stream from /api/chat.
+// Calls onStatus whenever the server emits a "status" event (tool running).
+// Returns the model's final text reply.
+// Throws ApiError on HTTP errors or stream-level failures.
+// ──────────────────────────────────────────────────────────────────────────────
+export async function getReply(
+  messages: ApiMessage[],
+  onStatus?: (label: string) => void
+): Promise<string> {
   let res: Response;
   try {
     res = await fetch("/api/chat", {
@@ -26,10 +31,46 @@ export async function getReply(messages: ApiMessage[]): Promise<string> {
     throw new ApiError(0, "Network error");
   }
 
+  // Non-2xx before the stream starts (e.g. 429 rate limit, 400 bad request)
   if (!res.ok) {
     throw new ApiError(res.status, `HTTP ${res.status}`);
   }
 
-  const data = (await res.json()) as { reply: string };
-  return data.reply;
+  const reader = res.body?.getReader();
+  if (!reader) throw new ApiError(0, "No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by double newlines
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data: ")) continue;
+      let event: StreamEvent;
+      try {
+        event = JSON.parse(line.slice(6)) as StreamEvent;
+      } catch {
+        continue;
+      }
+
+      if (event.type === "status") {
+        onStatus?.(event.label);
+      } else if (event.type === "text") {
+        return event.content;
+      } else if (event.type === "error") {
+        throw new ApiError(500, event.message);
+      }
+    }
+  }
+
+  throw new ApiError(0, "Stream ended without a reply");
 }

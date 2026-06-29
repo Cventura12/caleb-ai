@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/* ── Design tokens ────────────────────────────────────────────── */
+:root {
+  --navy: #15233f;
+  --navy-soft: #1e3358;
+  --ink: #1a2236;
+  --gray-1: #6b707a;
+  --gray-2: #9ba0a8;
+  --gray-3: #b4b8c0;
+  --line: #ebe9e4;
+  --line-2: #e8e6e1;
+  --bubble: #f4f3f0;
+  --bg: #ffffff;
+  --green: #3aaf78;
+}
+
+/* ── Tailwind theme — mirrors tokens as utility classes ───────── */
+@theme inline {
+  /* Colors */
+  --color-navy: var(--navy);
+  --color-navy-soft: var(--navy-soft);
+  --color-ink: var(--ink);
+  --color-gray-1: var(--gray-1);
+  --color-gray-2: var(--gray-2);
+  --color-gray-3: var(--gray-3);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-bubble: var(--bubble);
+  --color-bg: var(--bg);
+  --color-green: var(--green);
+
+  /* Fonts — next/font sets --font-fraunces and --font-inter on <html> */
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-fraunces);
+
+  /* Breakpoints — 600px mobile cutoff per spec */
+  --breakpoint-sm: 600px;
+}
+
+/* ── Base styles ──────────────────────────────────────────────── */
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* ── Message appear animation ─────────────────────────────────── */
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-animate {
+  animation: message-in 0.4s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-animate {
+    animation: none;
+  }
+}
+
+/* ── Typing indicator dots ────────────────────────────────────── */
+@keyframes dot-blink {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 1; }
+}
+
+.typing-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--gray-3);
+  animation: dot-blink 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot {
+    animation: none;
+    opacity: 0.5;
+  }
+}

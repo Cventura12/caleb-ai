@@ -54,7 +54,7 @@ function LaneBadge({ lane }: { lane: Lane }) {
       className={`text-[11px] px-2 py-0.5 rounded-full font-medium leading-none ${
         lane === "public"
           ? "text-[#3aaf78] bg-[#3aaf78]/10"
-          : "text-[#15233f] bg-[#15233f]/8"
+          : "text-[#7ea8f8] bg-[#2652c4]/20"
       }`}
     >
       {lane === "public" ? "Public" : "Owner-only"}
@@ -184,11 +184,11 @@ function AddConnectorForm({ onAdded, onCancel }: AddFormProps) {
         </div>
 
         {form.lane === "public" && (
-          <div className="border border-amber-200 bg-amber-50 rounded-lg p-4">
-            <p className="text-xs font-medium text-amber-800 mb-1.5">
+          <div className="border border-amber-700/40 bg-amber-950/30 rounded-lg p-4">
+            <p className="text-xs font-medium text-amber-400 mb-1.5">
               Public connector
             </p>
-            <p className="text-xs text-amber-700 mb-3 leading-relaxed">
+            <p className="text-xs text-amber-400/70 mb-3 leading-relaxed">
               Any visitor to your site will be able to trigger this connector&apos;s
               tools. Only mark a connector public if its worst-case action is harmless.
               Scope the credential to least-privilege permissions at the source.
@@ -198,9 +198,9 @@ function AddConnectorForm({ onAdded, onCancel }: AddFormProps) {
                 type="checkbox"
                 checked={publicConfirmed}
                 onChange={(e) => setPublicConfirmed(e.target.checked)}
-                className="mt-0.5 accent-amber-700"
+                className="mt-0.5 accent-amber-500"
               />
-              <span className="text-xs text-amber-800">
+              <span className="text-xs text-amber-400">
                 I understand this connector is accessible to all visitors
               </span>
             </label>
@@ -328,7 +328,7 @@ export default function OwnerPanel() {
       </div>
 
       {loadError && (
-        <div className="mb-6 text-sm text-red-500 border border-red-200 bg-red-50 rounded-lg px-4 py-3">
+        <div className="mb-6 text-sm text-red-400 border border-red-700/40 bg-red-950/30 rounded-lg px-4 py-3">
           {loadError}
         </div>
       )}
@@ -453,7 +453,7 @@ export default function OwnerPanel() {
                     <span
                       className={`text-[11px] px-2 py-0.5 rounded-full font-medium leading-none shrink-0 ${
                         v.action === "booked"
-                          ? "text-[#15233f] bg-[#15233f]/8"
+                          ? "text-[#7ea8f8] bg-[#2652c4]/20"
                           : "text-[#3aaf78] bg-[#3aaf78]/10"
                       }`}
                     >

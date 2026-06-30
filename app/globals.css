@@ -2,36 +2,36 @@
 
 /* ── Design tokens ────────────────────────────────────────────── */
 :root {
-  --navy: #15233f;
-  --navy-soft: #1e3358;
-  --ink: #1a2236;
-  --gray-1: #6b707a;
-  --gray-2: #9ba0a8;
-  --gray-3: #b4b8c0;
-  --line: #ebe9e4;
-  --line-2: #e8e6e1;
-  --bubble: #f4f3f0;
-  --bg: #ffffff;
-  --green: #3aaf78;
+  --navy:     #2652c4;    /* vivid deep blue — visible on dark bg */
+  --navy-soft:#3060d4;
+  --ink:      #eae7e0;    /* warm off-white */
+  --gray-1:   #858890;
+  --gray-2:   #515259;
+  --gray-3:   #363840;
+  --line:     #1d2030;
+  --line-2:   #20233a;
+  --bubble:   #141722;    /* dark surface — inputs + user bubbles */
+  --bg:       #0d1017;    /* deep dark background */
+  --green:    #3aaf78;
 }
 
 /* ── Tailwind theme — mirrors tokens as utility classes ───────── */
 @theme inline {
   /* Colors */
-  --color-navy: var(--navy);
+  --color-navy:      var(--navy);
   --color-navy-soft: var(--navy-soft);
-  --color-ink: var(--ink);
-  --color-gray-1: var(--gray-1);
-  --color-gray-2: var(--gray-2);
-  --color-gray-3: var(--gray-3);
-  --color-line: var(--line);
-  --color-line-2: var(--line-2);
-  --color-bubble: var(--bubble);
-  --color-bg: var(--bg);
-  --color-green: var(--green);
+  --color-ink:       var(--ink);
+  --color-gray-1:    var(--gray-1);
+  --color-gray-2:    var(--gray-2);
+  --color-gray-3:    var(--gray-3);
+  --color-line:      var(--line);
+  --color-line-2:    var(--line-2);
+  --color-bubble:    var(--bubble);
+  --color-bg:        var(--bg);
+  --color-green:     var(--green);
 
   /* Fonts — next/font sets --font-fraunces and --font-inter on <html> */
-  --font-sans: var(--font-inter);
+  --font-sans:  var(--font-inter);
   --font-serif: var(--font-fraunces);
 
   /* Breakpoints — 600px mobile cutoff per spec */
@@ -43,6 +43,18 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-inter), system-ui, sans-serif;
+}
+
+/* Subtle grain overlay — adds depth without looking like a dev site */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
 }
 
 /* ── Message appear animation ─────────────────────────────────── */
@@ -78,7 +90,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--gray-3);
+  background: var(--gray-2);
   animation: dot-blink 1.2s ease-in-out infinite;
 }
 
@@ -100,7 +112,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--gray-3);
+  background: var(--gray-2);
   flex-shrink: 0;
   animation: status-pulse 1.5s ease-in-out infinite;
 }

@@ -6,7 +6,6 @@ import { SUGGESTED_QUESTIONS } from "@/lib/knowledge";
 interface Props {
   onSend: (text: string) => void;
   disabled: boolean;
-  // Hide chips once the visitor has sent their first message
   showChips: boolean;
 }
 
@@ -38,10 +37,9 @@ export function Composer({ onSend, disabled, showChips }: Props) {
 
   return (
     <div
-      className="shrink-0 bg-white/90 backdrop-blur-sm"
+      className="shrink-0 bg-bg/95 backdrop-blur-sm"
       style={{ borderTop: "0.5px solid var(--line)" }}
     >
-      {/* Suggested question chips — visible until visitor sends first message */}
       {showChips && (
         <div className="flex flex-wrap gap-2 px-4 sm:px-6 pt-3 pb-1">
           {SUGGESTED_QUESTIONS.map((q) => (
@@ -63,7 +61,6 @@ export function Composer({ onSend, disabled, showChips }: Props) {
         </div>
       )}
 
-      {/* Input row */}
       <div className="flex items-end gap-3 px-4 sm:px-6 py-3">
         <label htmlFor="chat-input" className="sr-only">
           Ask me anything
@@ -80,8 +77,8 @@ export function Composer({ onSend, disabled, showChips }: Props) {
           disabled={disabled}
           className="
             flex-1 resize-none bg-bubble rounded-xl px-4 py-[11px]
-            text-[15px] text-ink placeholder:text-gray-3 leading-relaxed
-            overflow-y-auto focus:outline-none focus:ring-2 focus:ring-navy
+            text-[15px] text-ink placeholder:text-gray-2 leading-relaxed
+            overflow-y-auto focus:outline-none focus:ring-1 focus:ring-navy/50
             transition-[box-shadow] motion-reduce:transition-none
             disabled:opacity-50
           "
@@ -101,13 +98,7 @@ export function Composer({ onSend, disabled, showChips }: Props) {
             disabled:opacity-40 disabled:cursor-not-allowed
           "
         >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 18 18"
-            fill="none"
-            aria-hidden="true"
-          >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
             <path
               d="M3 9h12M10 4l5 5-5 5"
               stroke="white"

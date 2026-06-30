@@ -176,7 +176,7 @@ export default function ChatPage() {
 
       {/* ── TOP BAR ──────────────────────────────────────────────────────── */}
       <header
-        className="shrink-0 flex items-center justify-between px-4 sm:px-6 py-3 bg-white/90 backdrop-blur-sm z-10"
+        className="shrink-0 flex items-center justify-between px-4 sm:px-6 py-3 bg-bg/95 backdrop-blur-sm z-10"
         style={{ borderBottom: "0.5px solid var(--line)" }}
       >
         <div className="flex items-center gap-3">
@@ -234,18 +234,18 @@ export default function ChatPage() {
         {isGate ? (
           <div className="flex flex-col min-h-full px-4 sm:px-8 pt-12 sm:pt-14 pb-5">
             <div>
-              <h1 className="font-serif text-[25px] sm:text-[29px] text-ink leading-[1.3] max-w-[440px] mb-4">
-                Hey — I'm Caleb. The AI trained to be me.
+              <h1 className="font-serif text-[26px] sm:text-[31px] text-ink leading-[1.3] max-w-[440px] mb-4">
+                Hey — I&apos;m Caleb. The AI trained to be me.
               </h1>
-              <p className="text-[16px] text-gray-1 max-w-[410px] mb-6 leading-relaxed">
-                Ask me what I'm building, where I'm from, what I believe. But
+              <p className="text-[15.5px] text-gray-1 max-w-[410px] mb-7 leading-relaxed">
+                Ask me what I&apos;m building, where I&apos;m from, what I believe. But
                 first —
               </p>
-              <p className="text-[12px] text-gray-3 uppercase tracking-[0.05em]">
+              <p className="text-[11px] text-gray-2 uppercase tracking-[0.08em]">
                 How do you know me?
               </p>
             </div>
-            <p className="mt-auto pt-8 text-[11.5px] text-gray-3">caleb.ai</p>
+            <p className="mt-auto pt-8 text-[11px] text-gray-3 tracking-wide">caleb.ai</p>
           </div>
         ) : (
           <MessageList messages={messages} isTyping={isTyping} toolStatus={toolStatus} />
@@ -255,7 +255,7 @@ export default function ChatPage() {
       {/* ── DOCK ─────────────────────────────────────────────────────────── */}
       {isGate ? (
         <div
-          className="shrink-0 px-4 sm:px-6 py-3 bg-white/90 backdrop-blur-sm"
+          className="shrink-0 px-4 sm:px-6 py-3 bg-bg/95 backdrop-blur-sm"
           style={{ borderTop: "0.5px solid var(--line)" }}
         >
           <div className="flex items-end gap-3">
@@ -273,8 +273,8 @@ export default function ChatPage() {
               rows={1}
               className="
                 flex-1 resize-none bg-bubble rounded-xl px-4 py-[11px]
-                text-[15px] text-ink placeholder:text-gray-3 leading-relaxed
-                overflow-y-auto focus:outline-none focus:ring-2 focus:ring-navy
+                text-[15px] text-ink placeholder:text-gray-2 leading-relaxed
+                overflow-y-auto focus:outline-none focus:ring-1 focus:ring-navy/50
                 transition-[box-shadow] motion-reduce:transition-none
               "
               style={{ maxHeight: "120px" }}

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/session";
-import { SYSTEM_PROMPT } from "@/lib/knowledge";
+import { SYSTEM_PROMPT, OWNER_SYSTEM_PROMPT_EXTENSION } from "@/lib/knowledge";
 import { TOOL_REGISTRY } from "@/lib/tools/registry";
 import type { Lane, ToolDefinition } from "@/lib/tools/registry";
 import type { StreamEvent } from "@/lib/types";
@@ -89,6 +89,7 @@ async function runAgentLoop(
   lane: Lane,
   ip: string,
   sessionId: string | undefined,
+  ownerToken: string | undefined,
   ctrl: ReadableStreamDefaultController<Uint8Array>
 ): Promise<void> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -147,7 +148,9 @@ async function runAgentLoop(
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 1000,
-      system: SYSTEM_PROMPT,
+      system: lane === "owner"
+        ? SYSTEM_PROMPT + "\n\n" + OWNER_SYSTEM_PROMPT_EXTENSION
+        : SYSTEM_PROMPT,
       tools: toolDefs,
       messages,
     });
@@ -201,6 +204,7 @@ async function runAgentLoop(
           result = await tool.execute(tu.input as Record<string, unknown>, {
             ip,
             sessionId,
+            ownerToken,
           });
           console.log(`[agent] "${tool.name}" succeeded:`, result.slice(0, 300));
 
@@ -297,7 +301,7 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream<Uint8Array>({
     async start(ctrl) {
       try {
-        await runAgentLoop(messages, lane, ip, sessionId, ctrl);
+        await runAgentLoop(messages, lane, ip, sessionId, isOwner ? sessionToken : undefined, ctrl);
       } catch (err) {
         console.error("[/api/chat] Agent loop error:", err);
         ctrl.enqueue(

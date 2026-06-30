@@ -3,6 +3,12 @@ import { get_availability } from "./get_availability";
 import { create_scheduling_link } from "./create_scheduling_link";
 import { leave_message } from "./leave_message";
 import { owner_ping } from "./owner_ping";
+import { list_visitors } from "./owner/list_visitors";
+import { get_connector_status } from "./owner/get_connector_status";
+import { toggle_connector } from "./owner/toggle_connector";
+import { list_mcp_connectors } from "./owner/list_mcp_connectors";
+import { set_connector_lane } from "./owner/set_connector_lane";
+import { toggle_mcp_connector } from "./owner/toggle_mcp_connector";
 
 // ─── Tool registry types ──────────────────────────────────────────────────────
 
@@ -14,6 +20,9 @@ export type Lane = "public" | "owner";
 export interface ToolExecutionContext {
   ip: string;
   sessionId?: string;
+  // Raw session token — owner tools independently re-verify this before acting.
+  // Only populated when the request carries a valid owner session.
+  ownerToken?: string;
 }
 
 export interface ToolDefinition {
@@ -26,9 +35,9 @@ export interface ToolDefinition {
   };
   // Controls which request contexts may see and execute this tool.
   // "public" — any visitor may trigger it.
-  // "owner"  — only authenticated owner requests (future phase).
-  // Enforced both at tool-list time (model only sees allowed tools) and
-  // at execution time (double-checked before execute() is called).
+  // "owner"  — only authenticated owner requests.
+  // Enforced both at tool-list time and at execution time (double-checked
+  // before execute() is called in the agent loop).
   lane: Lane;
   // Present-progressive label shown to the visitor while the tool runs.
   statusLabel: string;
@@ -39,9 +48,17 @@ export interface ToolDefinition {
 // Add new tools here. The agent loop reads this array — no other wiring needed.
 
 export const TOOL_REGISTRY: ToolDefinition[] = [
+  // Public tools
   get_current_time,
   get_availability,
   create_scheduling_link,
   leave_message,
+  // Owner tools
   owner_ping,
+  list_visitors,
+  get_connector_status,
+  toggle_connector,
+  list_mcp_connectors,
+  set_connector_lane,
+  toggle_mcp_connector,
 ];

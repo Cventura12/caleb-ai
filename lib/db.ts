@@ -86,6 +86,12 @@ export type Database = {
         };
         Relationships: [];
       };
+      owner_actions: {
+        Row: { id: string; created_at: string; action: string; details: unknown };
+        Insert: { id?: string; created_at?: string; action: string; details?: Record<string, unknown> };
+        Update: { id?: string; created_at?: string; action?: string; details?: Record<string, unknown> };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

@@ -53,8 +53,20 @@ function useSessionId(): string | undefined {
   return ready ? ref.current : undefined;
 }
 
+function useIsOwner(): boolean {
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    fetch("/api/owner/me")
+      .then((r) => r.json())
+      .then((d: { isOwner?: boolean }) => setIsOwner(d.isOwner === true))
+      .catch(() => {});
+  }, []);
+  return isOwner;
+}
+
 export default function ChatPage() {
   const sessionId = useSessionId();
+  const isOwner = useIsOwner();
 
   // ── Gate state ────────────────────────────────────────────────────────────
   const [pageState, setPageState] = useState<PageState>("gate");
@@ -197,9 +209,24 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <span className="text-[11px] text-gray-3 shrink-0">
-          Chattanooga&nbsp;·&nbsp;18
-        </span>
+        {isOwner ? (
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-[11px] font-medium text-navy/70 bg-navy/8 px-2 py-0.5 rounded-full leading-none">
+              owner
+            </span>
+            <a
+              href="/owner"
+              className="text-[11px] text-gray-2 hover:text-ink transition-colors"
+              title="Control panel"
+            >
+              panel ↗
+            </a>
+          </div>
+        ) : (
+          <span className="text-[11px] text-gray-3 shrink-0">
+            Chattanooga&nbsp;·&nbsp;18
+          </span>
+        )}
       </header>
 
       {/* ── STAGE ────────────────────────────────────────────────────────── */}

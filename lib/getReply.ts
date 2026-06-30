@@ -10,28 +10,31 @@ export class ApiError extends Error {
   }
 }
 
-// ─── API seam ──────────────────────────────────────────────────────────────────
+export interface ReplyMeta {
+  sessionId?: string;
+  gateAnswer?: string;
+}
+
 // Consumes the SSE stream from /api/chat.
 // Calls onStatus whenever the server emits a "status" event (tool running).
 // Returns the model's final text reply.
 // Throws ApiError on HTTP errors or stream-level failures.
-// ──────────────────────────────────────────────────────────────────────────────
 export async function getReply(
   messages: ApiMessage[],
-  onStatus?: (label: string) => void
+  onStatus?: (label: string) => void,
+  meta?: ReplyMeta
 ): Promise<string> {
   let res: Response;
   try {
     res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, ...meta }),
     });
   } catch {
     throw new ApiError(0, "Network error");
   }
 
-  // Non-2xx before the stream starts (e.g. 429 rate limit, 400 bad request)
   if (!res.ok) {
     throw new ApiError(res.status, `HTTP ${res.status}`);
   }
@@ -48,7 +51,6 @@ export async function getReply(
 
     buffer += decoder.decode(value, { stream: true });
 
-    // SSE events are separated by double newlines
     const parts = buffer.split("\n\n");
     buffer = parts.pop() ?? "";
 

@@ -13,6 +13,7 @@ export type Lane = "public" | "owner";
 // functions with fewer parameters to be assigned to this interface.
 export interface ToolExecutionContext {
   ip: string;
+  sessionId?: string;
 }
 
 export interface ToolDefinition {

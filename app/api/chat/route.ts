@@ -7,38 +7,35 @@ import type { Lane, ToolDefinition } from "@/lib/tools/registry";
 import type { StreamEvent } from "@/lib/types";
 import { getEnabledToolNames, getEnabledMcpConnectors } from "@/lib/connectors";
 import { buildMcpTools } from "@/lib/mcp";
+import { checkRateLimit } from "@/lib/ratelimit";
+import { logVisitor, updateVisitorAction } from "@/lib/visitor-log";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// ─── Rate limiting ────────────────────────────────────────────────────────────
-const rateMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_MAX = 20;
-const RATE_WINDOW = 60_000;
-
-function isAllowed(ip: string): boolean {
-  const now = Date.now();
-  const rec = rateMap.get(ip);
-  if (!rec || now >= rec.resetAt) {
-    rateMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
-    return true;
-  }
-  if (rec.count >= RATE_MAX) return false;
-  rec.count++;
-  return true;
-}
 
 // ─── Input validation ─────────────────────────────────────────────────────────
 const MAX_MESSAGES = 50;
 const MAX_CONTENT_LEN = 4000;
 
+// Per-session message cap: owner is trusted so cap only applies to public.
+const SESSION_MSG_CAP = 30;
+
 type SimpleMessage = { role: "user" | "assistant"; content: string };
 
-function parseMessages(body: unknown): SimpleMessage[] | null {
+interface ParsedBody {
+  messages: SimpleMessage[];
+  sessionId?: string;
+  gateAnswer?: string;
+}
+
+function parseBody(body: unknown): ParsedBody | null {
   if (!body || typeof body !== "object") return null;
-  const { messages } = body as Record<string, unknown>;
+  const b = body as Record<string, unknown>;
+
+  const { messages, sessionId, gateAnswer } = b;
   if (!Array.isArray(messages) || messages.length === 0) return null;
   if (messages.length > MAX_MESSAGES) return null;
+
   for (const m of messages) {
     if (!m || typeof m !== "object") return null;
     const { role, content } = m as Record<string, unknown>;
@@ -46,7 +43,22 @@ function parseMessages(body: unknown): SimpleMessage[] | null {
     if (typeof content !== "string" || content.length === 0) return null;
     if (content.length > MAX_CONTENT_LEN) return null;
   }
-  return messages as SimpleMessage[];
+
+  return {
+    messages: messages as SimpleMessage[],
+    sessionId: typeof sessionId === "string" ? sessionId.slice(0, 64) : undefined,
+    gateAnswer: typeof gateAnswer === "string" ? gateAnswer.slice(0, 500) : undefined,
+  };
+}
+
+// ─── History trimming ─────────────────────────────────────────────────────────
+// Keeps conversation tokens bounded while preserving the gate-seed framing.
+// Rule: always keep messages[0] (the seed) + the most recent MAX_HISTORY - 1 messages.
+const MAX_HISTORY = 20;
+
+function trimHistory(messages: SimpleMessage[]): SimpleMessage[] {
+  if (messages.length <= MAX_HISTORY) return messages;
+  return [messages[0], ...messages.slice(-(MAX_HISTORY - 1))];
 }
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
@@ -57,30 +69,31 @@ function sse(event: StreamEvent): Uint8Array {
 }
 
 // ─── Connector-managed tool names ─────────────────────────────────────────────
-// These tools are exposed only when their connector is enabled in the DB.
-// Tools NOT in this set (get_current_time, owner_ping) are always enabled.
 const CONNECTOR_MANAGED_TOOLS = new Set([
   "get_availability",
   "create_scheduling_link",
   "leave_message",
 ]);
 
-// ─── Agent loop ───────────────────────────────────────────────────────────────
-// Calls Anthropic with tools, processes tool_use blocks, loops until end_turn.
-// All events are pushed to the ReadableStream controller as SSE frames.
+// Tools whose success should be recorded as visitor actions.
+const ACTION_TOOLS: Record<string, "booked" | "messaged"> = {
+  create_scheduling_link: "booked",
+  leave_message: "messaged",
+};
 
+// ─── Agent loop ───────────────────────────────────────────────────────────────
 const MAX_ITER = 5;
 
 async function runAgentLoop(
   initialMessages: SimpleMessage[],
   lane: Lane,
   ip: string,
+  sessionId: string | undefined,
   ctrl: ReadableStreamDefaultController<Uint8Array>
 ): Promise<void> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   // ── 1. Load connector state from DB ───────────────────────────────────────
-  // Graceful fallback: if Supabase isn't configured, all built-in tools enabled.
   let enabledConnectorTools: Set<string>;
   let mcpConnectors: Awaited<ReturnType<typeof getEnabledMcpConnectors>> = [];
   try {
@@ -94,8 +107,6 @@ async function runAgentLoop(
   }
 
   // ── 2. Filter built-in tools ──────────────────────────────────────────────
-  // Lane: owner sees all tools (public + owner); public sees only public tools.
-  // Connector toggle: connector-managed tools are gated on DB enabled state.
   const allowedBuiltins = TOOL_REGISTRY.filter((t) => {
     const laneOk = lane === "owner" || t.lane === "public";
     if (!laneOk) return false;
@@ -118,8 +129,6 @@ async function runAgentLoop(
   }
 
   // ── 4. Combined tool list ─────────────────────────────────────────────────
-  // This is the single source of truth for both the Anthropic API call and
-  // execution lookup. MCP tools come after built-ins; built-ins win on name conflicts.
   const allAllowedTools: ToolDefinition[] = [...allowedBuiltins, ...mcpTools];
   const allowedNames = new Set(allAllowedTools.map((t) => t.name));
 
@@ -129,7 +138,6 @@ async function runAgentLoop(
     input_schema: t.input_schema as Anthropic.Tool.InputSchema,
   }));
 
-  // Mutable history — grows as the loop adds assistant/tool-result turns.
   const messages: Anthropic.MessageParam[] = initialMessages.map((m) => ({
     role: m.role,
     content: m.content,
@@ -148,7 +156,6 @@ async function runAgentLoop(
       `[agent] iter=${i} stop_reason="${response.stop_reason}" lane="${lane}" tools=[${allAllowedTools.map((t) => t.name).join(",")}]`
     );
 
-    // ── Final text answer ────────────────────────────────────────────────────
     if (response.stop_reason === "end_turn") {
       const text = response.content
         .filter((b): b is Anthropic.TextBlock => b.type === "text")
@@ -158,7 +165,6 @@ async function runAgentLoop(
       return;
     }
 
-    // ── Tool use ─────────────────────────────────────────────────────────────
     if (response.stop_reason === "tool_use") {
       const toolUseBlocks = response.content.filter(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
@@ -176,7 +182,6 @@ async function runAgentLoop(
           `[agent] tool_use: name="${tu.name}" id="${tu.id}" input=${JSON.stringify(tu.input)}`
         );
 
-        // ── Lane enforcement step 2: re-verify at execution time ─────────────
         if (!allowedNames.has(tu.name)) {
           console.warn(`[agent] BLOCKED — tool "${tu.name}" not in lane "${lane}"`);
           toolResults.push({
@@ -189,17 +194,27 @@ async function runAgentLoop(
         }
 
         const tool = allAllowedTools.find((t) => t.name === tu.name)!;
-        console.log(`[agent] executing "${tool.name}"`);
-
         ctrl.enqueue(sse({ type: "status", label: tool.statusLabel }));
 
         let result: string;
         try {
-          result = await tool.execute(tu.input as Record<string, unknown>, { ip });
-          console.log(
-            `[agent] "${tool.name}" succeeded:`,
-            result.slice(0, 300)
-          );
+          result = await tool.execute(tu.input as Record<string, unknown>, {
+            ip,
+            sessionId,
+          });
+          console.log(`[agent] "${tool.name}" succeeded:`, result.slice(0, 300));
+
+          // Record visitor action on first success for tracked tools.
+          if (sessionId && ACTION_TOOLS[tu.name]) {
+            try {
+              const parsed = JSON.parse(result) as { success?: boolean };
+              if (parsed.success === true) {
+                void updateVisitorAction(sessionId, ACTION_TOOLS[tu.name]);
+              }
+            } catch {
+              // Non-JSON result — skip action tracking
+            }
+          }
         } catch (err) {
           console.error(`[agent] "${tool.name}" threw:`, err);
           result = `Error: ${err instanceof Error ? err.message : "tool failed"}`;
@@ -216,7 +231,6 @@ async function runAgentLoop(
       continue;
     }
 
-    // Unexpected stop reason (e.g. max_tokens) — bail.
     break;
   }
 
@@ -227,17 +241,18 @@ async function runAgentLoop(
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  // 1. Rate limit
   const forwarded = req.headers.get("x-forwarded-for");
   const ip = forwarded?.split(",")[0]?.trim() ?? "unknown";
-  if (!isAllowed(ip)) {
+
+  // Durable rate limit: 20 requests per IP per minute
+  const allowed = await checkRateLimit(`${ip}:chat`, 60, 20);
+  if (!allowed) {
     return new Response(JSON.stringify({ error: "Too many requests." }), {
       status: 429,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // 2. Parse body
   let body: unknown;
   try {
     body = await req.json();
@@ -248,27 +263,41 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 3. Validate messages
-  const messages = parseMessages(body);
-  if (!messages) {
+  const parsed = parseBody(body);
+  if (!parsed) {
     return new Response(JSON.stringify({ error: "Invalid request body." }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  // 4. Lane — derived entirely from the verified session cookie.
-  // Client input cannot influence this: the cookie is HttpOnly and the
-  // check is server-side. No valid session → always "public".
+  const { messages: rawMessages, sessionId, gateAnswer } = parsed;
+
+  // Lane — derived entirely from the verified session cookie.
   const sessionToken = req.cookies.get(SESSION_COOKIE)?.value;
   const isOwner = sessionToken ? await verifySessionToken(sessionToken) : false;
   const lane: Lane = isOwner ? "owner" : "public";
 
-  // 5. Stream the agent loop as SSE
+  // Per-session message cap (public only — owner is trusted).
+  if (lane === "public" && rawMessages.length > SESSION_MSG_CAP) {
+    return new Response(
+      JSON.stringify({ error: "Conversation limit reached — start a new session." }),
+      { status: 429, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  // Trim history to avoid token bloat, preserving the seed framing.
+  const messages = trimHistory(rawMessages);
+
+  // Log visitor on first message (just the gate seed, no prior exchange).
+  if (lane === "public" && sessionId && rawMessages.length === 1) {
+    void logVisitor(sessionId, gateAnswer ?? null, rawMessages[0].content);
+  }
+
   const stream = new ReadableStream<Uint8Array>({
     async start(ctrl) {
       try {
-        await runAgentLoop(messages, lane, ip, ctrl);
+        await runAgentLoop(messages, lane, ip, sessionId, ctrl);
       } catch (err) {
         console.error("[/api/chat] Agent loop error:", err);
         ctrl.enqueue(

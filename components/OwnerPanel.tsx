@@ -230,6 +230,17 @@ function AddConnectorForm({ onAdded, onCancel }: AddFormProps) {
   );
 }
 
+// ─── Visitor log types ────────────────────────────────────────────────────────
+
+interface Visitor {
+  id: string;
+  created_at: string;
+  session_id: string;
+  gate_answer: string | null;
+  first_message: string;
+  action: string | null;
+}
+
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export default function OwnerPanel() {
@@ -237,6 +248,9 @@ export default function OwnerPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+
+  const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [visitorsLoading, setVisitorsLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -251,7 +265,20 @@ export default function OwnerPanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadVisitors = useCallback(async () => {
+    try {
+      const res = await fetch("/api/owner/visitors");
+      if (!res.ok) return;
+      const d = await res.json() as { visitors: Visitor[] };
+      setVisitors(d.visitors ?? []);
+    } catch {
+      // Visitor log is best-effort — don't surface errors for it
+    } finally {
+      setVisitorsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); loadVisitors(); }, [load, loadVisitors]);
 
   async function toggle(id: string, currentEnabled: boolean) {
     // Optimistic update
@@ -403,6 +430,47 @@ export default function OwnerPanel() {
             <span>Add connector</span>
           </button>
         )}
+      </section>
+
+      {/* Recent visitors */}
+      <section className="mt-10">
+        <p className="text-[11px] font-medium text-gray-2 uppercase tracking-wider mb-3">
+          Recent visitors
+        </p>
+        <div className="border border-line rounded-xl divide-y divide-line">
+          {visitorsLoading ? (
+            <div className="px-5 py-4 text-sm text-gray-2">Loading…</div>
+          ) : visitors.length === 0 ? (
+            <div className="px-5 py-4 text-sm text-gray-2">No visitors yet.</div>
+          ) : (
+            visitors.map((v) => (
+              <div key={v.id} className="px-5 py-3">
+                <div className="flex items-center justify-between gap-3 mb-0.5">
+                  <span className="text-xs text-gray-3">
+                    {new Date(v.created_at).toLocaleString()}
+                  </span>
+                  {v.action && (
+                    <span
+                      className={`text-[11px] px-2 py-0.5 rounded-full font-medium leading-none shrink-0 ${
+                        v.action === "booked"
+                          ? "text-[#15233f] bg-[#15233f]/8"
+                          : "text-[#3aaf78] bg-[#3aaf78]/10"
+                      }`}
+                    >
+                      {v.action}
+                    </span>
+                  )}
+                </div>
+                {v.gate_answer && (
+                  <p className="text-xs text-gray-2 italic mb-0.5 truncate">
+                    &ldquo;{v.gate_answer}&rdquo;
+                  </p>
+                )}
+                <p className="text-xs text-ink truncate">{v.first_message}</p>
+              </div>
+            ))
+          )}
+        </div>
       </section>
     </div>
   );

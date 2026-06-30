@@ -4,8 +4,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// Minimal schema type for the connectors table.
-// Keeps Supabase query builder fully typed without running codegen.
+// Minimal schema types — keeps the query builder typed without running codegen.
 export type Database = {
   public: {
     Tables: {
@@ -54,9 +53,47 @@ export type Database = {
         };
         Relationships: [];
       };
+      rate_limit_buckets: {
+        Row: { key: string; count: number; window_start: string };
+        Insert: { key: string; count?: number; window_start?: string };
+        Update: { key?: string; count?: number; window_start?: string };
+        Relationships: [];
+      };
+      visitor_log: {
+        Row: {
+          id: string;
+          created_at: string;
+          session_id: string;
+          gate_answer: string | null;
+          first_message: string;
+          action: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          session_id: string;
+          gate_answer?: string | null;
+          first_message: string;
+          action?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          session_id?: string;
+          gate_answer?: string | null;
+          first_message?: string;
+          action?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      check_rate_limit: {
+        Args: { p_key: string; p_window_seconds: number; p_max: number };
+        Returns: boolean;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

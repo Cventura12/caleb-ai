@@ -1,32 +1,11 @@
 import type { ToolDefinition, ToolExecutionContext } from "./registry";
 import { sendMessageToOwner, sanitize, isValidEmail } from "@/lib/email";
+import { checkRateLimit } from "@/lib/ratelimit";
 
-// ─── Per-tool rate limiter ────────────────────────────────────────────────────
-// Tighter than the global chat limiter: 3 messages per IP per hour.
-// In-memory — resets on redeploy. A durable store (Upstash Redis, etc.)
-// would harden this in production against persistent bad actors.
-const rateMap = new Map<string, { count: number; resetAt: number }>();
-const MSG_MAX = 3;
-const MSG_WINDOW = 3_600_000; // 1 hour
-
-function isAllowed(ip: string): boolean {
-  const now = Date.now();
-  const rec = rateMap.get(ip);
-  if (!rec || now >= rec.resetAt) {
-    rateMap.set(ip, { count: 1, resetAt: now + MSG_WINDOW });
-    return true;
-  }
-  if (rec.count >= MSG_MAX) return false;
-  rec.count++;
-  return true;
-}
-
-// ─── Input validation ─────────────────────────────────────────────────────────
 const MAX_MSG_LEN = 2000;
 const MAX_NAME_LEN = 100;
 const MAX_CONTACT_LEN = 200;
 
-// ─── Tool ─────────────────────────────────────────────────────────────────────
 export const leave_message: ToolDefinition = {
   name: "leave_message",
   description:
@@ -55,8 +34,9 @@ export const leave_message: ToolDefinition = {
   execute: async (input, ctx: ToolExecutionContext) => {
     console.log("[leave_message] execute() entered | input:", JSON.stringify(input));
 
-    // ── Rate limit ───────────────────────────────────────────────────────────
-    if (!isAllowed(ctx.ip)) {
+    // Durable rate limit: 3 messages per IP per hour
+    const allowed = await checkRateLimit(`${ctx.ip}:leave_message`, 3600, 3);
+    if (!allowed) {
       return JSON.stringify({
         success: false,
         reason: "rate_limited",
@@ -64,7 +44,6 @@ export const leave_message: ToolDefinition = {
       });
     }
 
-    // ── Validate and sanitize ─────────────────────────────────────────────────
     const rawMessage = typeof input.message === "string" ? input.message.trim() : "";
     if (!rawMessage) {
       return JSON.stringify({ success: false, reason: "empty_message" });
@@ -89,18 +68,11 @@ export const leave_message: ToolDefinition = {
       ? sanitize(rawContact).slice(0, MAX_CONTACT_LEN) || undefined
       : undefined;
 
-    // Warn if contact looks like an email but isn't valid — model can relay this.
     const contactLooksLikeEmail =
       fromContact && fromContact.includes("@") && !isValidEmail(fromContact);
 
-    // ── Send ──────────────────────────────────────────────────────────────────
     try {
-      await sendMessageToOwner({
-        message: rawMessage,
-        fromName,
-        fromContact,
-      });
-
+      await sendMessageToOwner({ message: rawMessage, fromName, fromContact });
       console.log("[leave_message] sent successfully");
       return JSON.stringify({
         success: true,

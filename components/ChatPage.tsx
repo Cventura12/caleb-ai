@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { Message, ApiMessage } from "@/lib/types";
 import { getReply, ApiError } from "@/lib/getReply";
 import { MessageList } from "./MessageList";
@@ -35,7 +35,27 @@ function errorBubble(err: unknown): Message {
   return { id: newId(), role: "them", text, isError: true };
 }
 
+// Generate a stable session ID per browser session (survives React re-renders,
+// resets on tab close). useRef + useEffect avoids SSR hydration mismatch.
+function useSessionId(): string | undefined {
+  const ref = useRef<string | undefined>(undefined);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const KEY = "caleb_ai_sid";
+    let id = sessionStorage.getItem(KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      sessionStorage.setItem(KEY, id);
+    }
+    ref.current = id;
+    setReady(true);
+  }, []);
+  return ready ? ref.current : undefined;
+}
+
 export default function ChatPage() {
+  const sessionId = useSessionId();
+
   // ── Gate state ────────────────────────────────────────────────────────────
   const [pageState, setPageState] = useState<PageState>("gate");
   const [gateInput, setGateInput] = useState("");
@@ -74,7 +94,11 @@ export default function ChatPage() {
 
     // Fetch the personalized greeting immediately — first visible message in thread
     try {
-      const reply = await getReply([seed], (label) => setToolStatus(label));
+      const reply = await getReply(
+        [seed],
+        (label) => setToolStatus(label),
+        { sessionId, gateAnswer: trimmed }
+      );
       setToolStatus(null);
       setMessages([{ id: newId(), role: "them", text: reply }]);
     } catch (err) {
@@ -116,7 +140,8 @@ export default function ChatPage() {
     try {
       const reply = await getReply(
         buildApiHistory(apiSeed, next),
-        (label) => setToolStatus(label)
+        (label) => setToolStatus(label),
+        { sessionId }
       );
       setToolStatus(null);
       setMessages((prev) => [

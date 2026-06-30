@@ -2,6 +2,7 @@ import { get_current_time } from "./get_current_time";
 import { get_availability } from "./get_availability";
 import { create_scheduling_link } from "./create_scheduling_link";
 import { leave_message } from "./leave_message";
+import { owner_ping } from "./owner_ping";
 
 // ─── Tool registry types ──────────────────────────────────────────────────────
 
@@ -41,4 +42,5 @@ export const TOOL_REGISTRY: ToolDefinition[] = [
   get_availability,
   create_scheduling_link,
   leave_message,
+  owner_ping,
 ];

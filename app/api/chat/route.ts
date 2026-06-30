@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { verifySessionToken, SESSION_COOKIE } from "@/lib/session";
 import { SYSTEM_PROMPT } from "@/lib/knowledge";
 import { TOOL_REGISTRY } from "@/lib/tools/registry";
 import type { Lane } from "@/lib/tools/registry";
@@ -206,9 +207,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 4. Lane — hardcoded "public" for now; a future auth phase sets this from
-  // a verified session token, never from client-supplied input.
-  const lane: Lane = "public";
+  // 4. Lane — derived entirely from the verified session cookie.
+  // Client input cannot influence this: the cookie is HttpOnly and the
+  // check is server-side. No valid session → always "public".
+  const sessionToken = req.cookies.get(SESSION_COOKIE)?.value;
+  const isOwner = sessionToken ? await verifySessionToken(sessionToken) : false;
+  const lane: Lane = isOwner ? "owner" : "public";
 
   // 5. Stream the agent loop as SSE
   const stream = new ReadableStream<Uint8Array>({

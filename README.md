@@ -24,6 +24,16 @@ CALENDLY_EVENT_SLUG=30min
 RESEND_API_KEY=your-resend-api-key-here
 OWNER_EMAIL=you@example.com
 # RESEND_FROM_EMAIL=onboarding@resend.dev  # default; change after domain verification
+
+# Owner auth — required for /owner area
+OWNER_PASSWORD=your-strong-password-here
+SESSION_SECRET=your-64-char-hex-secret-here  # see below
+```
+
+Generate a strong `SESSION_SECRET`:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 **Where to get each value:**
@@ -36,6 +46,8 @@ OWNER_EMAIL=you@example.com
 | `RESEND_API_KEY` | resend.com → API Keys |
 | `OWNER_EMAIL` | Your email address (where visitor messages are delivered) |
 | `RESEND_FROM_EMAIL` | Optional. Defaults to `onboarding@resend.dev` (no domain setup needed if `OWNER_EMAIL` matches your Resend account email). Set to `noreply@yourdomain.com` after verifying a domain at resend.com/domains. |
+| `OWNER_PASSWORD` | A strong password you choose — only you need to know it |
+| `SESSION_SECRET` | 32 random bytes as hex — run the command above to generate |
 
 ```bash
 npm run dev   # http://localhost:3000

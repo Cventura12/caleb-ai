@@ -17,18 +17,18 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://caleb.ai"),
-  title: "Caleb Abuabara",
+  title: "Caleb Ventura",
   description: "Talk to an AI trained to be me — ask what I'm building, where I'm from, or how to get in touch.",
   openGraph: {
-    title: "Caleb Abuabara",
+    title: "Caleb Ventura",
     description: "Talk to an AI trained to be me — ask what I'm building, where I'm from, or how to get in touch.",
     url: "/",
-    siteName: "Caleb Abuabara",
+    siteName: "Caleb Ventura",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "Caleb Abuabara",
+    title: "Caleb Ventura",
     description: "Talk to an AI trained to be me — ask what I'm building, where I'm from, or how to get in touch.",
   },
 };

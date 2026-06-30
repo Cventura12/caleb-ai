@@ -177,13 +177,13 @@ export default function ChatPage() {
             aria-hidden="true"
           >
             <span className="text-white text-[13px] font-medium tracking-wide">
-              CA
+              CV
             </span>
           </div>
 
           <div>
             <p className="text-[14px] font-medium text-ink leading-none mb-[3px]">
-              Caleb Abuabara
+              Caleb Ventura
             </p>
             <div className="flex items-center gap-[5px]">
               <span

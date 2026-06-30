@@ -28,13 +28,27 @@ OWNER_EMAIL=you@example.com
 # Owner auth — required for /owner area
 OWNER_PASSWORD=your-strong-password-here
 SESSION_SECRET=your-64-char-hex-secret-here  # see below
+
+# Owner control panel — Supabase + encryption (required for /owner panel)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+ENCRYPTION_KEY=your-64-char-hex-encryption-key-here
 ```
 
-Generate a strong `SESSION_SECRET`:
+Generate strong secrets:
 
 ```bash
+# SESSION_SECRET and ENCRYPTION_KEY — run once each, save in a password manager
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
+
+**Supabase setup (one-time):**
+
+1. Create a project at [supabase.com](https://supabase.com)
+2. Run `supabase/schema.sql` in the SQL editor (Database → SQL Editor → New query)
+3. Copy Project URL → `SUPABASE_URL`
+4. Copy service_role secret key → `SUPABASE_SERVICE_ROLE_KEY` (never expose this)
+5. Generate a fresh hex key → `ENCRYPTION_KEY`
 
 **Where to get each value:**
 
@@ -45,9 +59,12 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `CALENDLY_EVENT_SLUG` | The slug in your event type's URL: `calendly.com/you/THIS-PART` |
 | `RESEND_API_KEY` | resend.com → API Keys |
 | `OWNER_EMAIL` | Your email address (where visitor messages are delivered) |
-| `RESEND_FROM_EMAIL` | Optional. Defaults to `onboarding@resend.dev` (no domain setup needed if `OWNER_EMAIL` matches your Resend account email). Set to `noreply@yourdomain.com` after verifying a domain at resend.com/domains. |
+| `RESEND_FROM_EMAIL` | Optional. Defaults to `onboarding@resend.dev`. Set to `noreply@yourdomain.com` after verifying a domain. |
 | `OWNER_PASSWORD` | A strong password you choose — only you need to know it |
-| `SESSION_SECRET` | 32 random bytes as hex — run the command above to generate |
+| `SESSION_SECRET` | 32 random bytes as hex — run the command above |
+| `SUPABASE_URL` | supabase.com → your project → Settings → API → Project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | supabase.com → your project → Settings → API → service_role (keep secret) |
+| `ENCRYPTION_KEY` | 32 random bytes as hex — run the command above (separate key from SESSION_SECRET) |
 
 ```bash
 npm run dev   # http://localhost:3000

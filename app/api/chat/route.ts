@@ -3,8 +3,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/session";
 import { SYSTEM_PROMPT } from "@/lib/knowledge";
 import { TOOL_REGISTRY } from "@/lib/tools/registry";
-import type { Lane } from "@/lib/tools/registry";
+import type { Lane, ToolDefinition } from "@/lib/tools/registry";
 import type { StreamEvent } from "@/lib/types";
+import { getEnabledToolNames, getEnabledMcpConnectors } from "@/lib/connectors";
+import { buildMcpTools } from "@/lib/mcp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +56,15 @@ function sse(event: StreamEvent): Uint8Array {
   return enc.encode(`data: ${JSON.stringify(event)}\n\n`);
 }
 
+// ─── Connector-managed tool names ─────────────────────────────────────────────
+// These tools are exposed only when their connector is enabled in the DB.
+// Tools NOT in this set (get_current_time, owner_ping) are always enabled.
+const CONNECTOR_MANAGED_TOOLS = new Set([
+  "get_availability",
+  "create_scheduling_link",
+  "leave_message",
+]);
+
 // ─── Agent loop ───────────────────────────────────────────────────────────────
 // Calls Anthropic with tools, processes tool_use blocks, loops until end_turn.
 // All events are pushed to the ReadableStream controller as SSE frames.
@@ -68,12 +79,51 @@ async function runAgentLoop(
 ): Promise<void> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // ── Lane enforcement: filter registry to what this lane may see ────────────
-  // Step 1: only allowed tools are sent to the model.
-  const allowedTools = TOOL_REGISTRY.filter((t) => t.lane === lane);
-  const allowedNames = new Set(allowedTools.map((t) => t.name));
+  // ── 1. Load connector state from DB ───────────────────────────────────────
+  // Graceful fallback: if Supabase isn't configured, all built-in tools enabled.
+  let enabledConnectorTools: Set<string>;
+  let mcpConnectors: Awaited<ReturnType<typeof getEnabledMcpConnectors>> = [];
+  try {
+    [enabledConnectorTools, mcpConnectors] = await Promise.all([
+      getEnabledToolNames(),
+      getEnabledMcpConnectors(),
+    ]);
+  } catch (err) {
+    console.warn("[agent] Connector DB unavailable, using defaults:", err);
+    enabledConnectorTools = new Set(CONNECTOR_MANAGED_TOOLS);
+  }
 
-  const toolDefs: Anthropic.Tool[] = allowedTools.map((t) => ({
+  // ── 2. Filter built-in tools ──────────────────────────────────────────────
+  // Lane: owner sees all tools (public + owner); public sees only public tools.
+  // Connector toggle: connector-managed tools are gated on DB enabled state.
+  const allowedBuiltins = TOOL_REGISTRY.filter((t) => {
+    const laneOk = lane === "owner" || t.lane === "public";
+    if (!laneOk) return false;
+    if (CONNECTOR_MANAGED_TOOLS.has(t.name)) return enabledConnectorTools.has(t.name);
+    return true;
+  });
+
+  // ── 3. Build MCP proxy tools ──────────────────────────────────────────────
+  let mcpTools: ToolDefinition[] = [];
+  if (mcpConnectors.length > 0) {
+    const arrays = await Promise.all(
+      mcpConnectors.map((c) =>
+        buildMcpTools(c, lane).catch((err) => {
+          console.error(`[agent] MCP "${c.name}" failed:`, err);
+          return [] as ToolDefinition[];
+        })
+      )
+    );
+    mcpTools = arrays.flat();
+  }
+
+  // ── 4. Combined tool list ─────────────────────────────────────────────────
+  // This is the single source of truth for both the Anthropic API call and
+  // execution lookup. MCP tools come after built-ins; built-ins win on name conflicts.
+  const allAllowedTools: ToolDefinition[] = [...allowedBuiltins, ...mcpTools];
+  const allowedNames = new Set(allAllowedTools.map((t) => t.name));
+
+  const toolDefs: Anthropic.Tool[] = allAllowedTools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema as Anthropic.Tool.InputSchema,
@@ -94,7 +144,9 @@ async function runAgentLoop(
       messages,
     });
 
-    console.log(`[agent] iter=${i} stop_reason="${response.stop_reason}" content_types=[${response.content.map((b) => b.type).join(",")}]`);
+    console.log(
+      `[agent] iter=${i} stop_reason="${response.stop_reason}" lane="${lane}" tools=[${allAllowedTools.map((t) => t.name).join(",")}]`
+    );
 
     // ── Final text answer ────────────────────────────────────────────────────
     if (response.stop_reason === "end_turn") {
@@ -112,9 +164,6 @@ async function runAgentLoop(
         (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
       );
 
-      // Append the assistant's full turn (with tool_use blocks) to history.
-      // Cast needed: response ContentBlock vs param ContentBlockParam differ
-      // only by extra fields on some subtypes — the data is semantically correct.
       messages.push({
         role: "assistant",
         content: response.content as unknown as Anthropic.ContentBlockParam[],
@@ -123,10 +172,11 @@ async function runAgentLoop(
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const tu of toolUseBlocks) {
-        console.log(`[agent] tool_use: name="${tu.name}" id="${tu.id}" input=${JSON.stringify(tu.input)}`);
-        console.log(`[agent] allowed names: [${[...allowedNames].join(", ")}]`);
+        console.log(
+          `[agent] tool_use: name="${tu.name}" id="${tu.id}" input=${JSON.stringify(tu.input)}`
+        );
 
-        // ── Lane enforcement: Step 2 — re-verify at execution time ─────────
+        // ── Lane enforcement step 2: re-verify at execution time ─────────────
         if (!allowedNames.has(tu.name)) {
           console.warn(`[agent] BLOCKED — tool "${tu.name}" not in lane "${lane}"`);
           toolResults.push({
@@ -138,18 +188,20 @@ async function runAgentLoop(
           continue;
         }
 
-        const tool = TOOL_REGISTRY.find((t) => t.name === tu.name)!;
-        console.log(`[agent] found tool in registry: "${tool.name}" — calling execute()`);
+        const tool = allAllowedTools.find((t) => t.name === tu.name)!;
+        console.log(`[agent] executing "${tool.name}"`);
 
-        // Emit status BEFORE executing so the client sees it immediately.
         ctrl.enqueue(sse({ type: "status", label: tool.statusLabel }));
 
         let result: string;
         try {
           result = await tool.execute(tu.input as Record<string, unknown>, { ip });
-          console.log(`[agent] tool execute succeeded: "${tool.name}" → result:`, result.slice(0, 300));
+          console.log(
+            `[agent] "${tool.name}" succeeded:`,
+            result.slice(0, 300)
+          );
         } catch (err) {
-          console.error(`[agent] tool execute THREW: "${tool.name}" →`, err);
+          console.error(`[agent] "${tool.name}" threw:`, err);
           result = `Error: ${err instanceof Error ? err.message : "tool failed"}`;
         }
 
@@ -160,7 +212,6 @@ async function runAgentLoop(
         });
       }
 
-      // Append tool results as the next user turn and loop.
       messages.push({ role: "user", content: toolResults });
       continue;
     }
@@ -169,7 +220,6 @@ async function runAgentLoop(
     break;
   }
 
-  // Safety cap: MAX_ITER exhausted or unexpected stop reason.
   ctrl.enqueue(
     sse({ type: "error", message: "ah something took too long on my end — try again in a sec" })
   );

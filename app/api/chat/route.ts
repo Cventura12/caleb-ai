@@ -62,6 +62,7 @@ const MAX_ITER = 5;
 async function runAgentLoop(
   initialMessages: SimpleMessage[],
   lane: Lane,
+  ip: string,
   ctrl: ReadableStreamDefaultController<Uint8Array>
 ): Promise<void> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -144,7 +145,7 @@ async function runAgentLoop(
 
         let result: string;
         try {
-          result = await tool.execute(tu.input as Record<string, unknown>);
+          result = await tool.execute(tu.input as Record<string, unknown>, { ip });
           console.log(`[agent] tool execute succeeded: "${tool.name}" → result:`, result.slice(0, 300));
         } catch (err) {
           console.error(`[agent] tool execute THREW: "${tool.name}" →`, err);
@@ -213,7 +214,7 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream<Uint8Array>({
     async start(ctrl) {
       try {
-        await runAgentLoop(messages, lane, ctrl);
+        await runAgentLoop(messages, lane, ip, ctrl);
       } catch (err) {
         console.error("[/api/chat] Agent loop error:", err);
         ctrl.enqueue(
